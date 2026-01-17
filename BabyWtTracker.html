@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0ea5e9">
+    
+    <!-- Mobile Web App Capability (iOS/Legacy Android) -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="BabyWeight">
+    <title>Baby Weight Tracker</title>
+    
+    <!-- Manifest: We construct this dynamically in JS to handle file:// vs https:// -->
+    <link rel="manifest" id="my-manifest">
+    
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script>
+        // --- DYNAMIC CONFIGURATION ---
+        // 1. Setup Tailwind
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        baby: { 50: '#f0f9ff', 100: '#e0f2fe', 400: '#38bdf8', 500: '#0ea5e9', 600: '#0284c7' }
+                    }
+                }
+            }
+        };
+
+        // 2. Handle Manifest & Service Worker based on protocol
+        window.addEventListener('load', () => {
+            const isLocal = window.location.protocol === 'file:';
+            const manifestLink = document.getElementById('my-manifest');
+
+            if (isLocal) {
+                // If local file, DO NOT use a manifest. 
+                // This forces Chrome to offer "Add to Home Screen" (Shortcut) instead of "Install App" (PWA),
+                // which often fails for local files.
+                manifestLink.remove();
+            } else {
+                // If online, use full PWA manifest
+                const manifest = {
+                    "name": "Baby Weight Tracker",
+                    "short_name": "BabyWeight",
+                    "start_url": ".",
+                    "display": "standalone",
+                    "background_color": "#f8fafc",
+                    "theme_color": "#0ea5e9",
+                    "icons": [{
+                        "src": "https://cdn-icons-png.flaticon.com/512/3209/3209121.png",
+                        "sizes": "512x512",
+                        "type": "image/png"
+                    }]
+                };
+                manifestLink.href = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(manifest));
+
+                // Register dummy SW for install prompt
+                if ('serviceWorker' in navigator) {
+                    navigator.serviceWorker.register('data:text/javascript;base64,c2VsZi5hZGRFdmVudExpc3RlbmVyKCdZmV0Y2gnLCBlID0+IGUucmVzcG9uZFdpdGgoZmV0Y2goZS5yZXF1ZXN0KSkpOw==');
+                }
+            }
+        });
+    </script>
+    
+    <style>
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        body { overscroll-behavior-y: contain; -webkit-tap-highlight-color: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .modal-backdrop { background-color: rgba(0,0,0,0.5); backdrop-filter: blur(2px); }
+    </style>
+</head>
+<body class="bg-gray-50 text-slate-800 h-screen overflow-hidden select-none">
+    <div id="root" class="h-full"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        const REFERENCE_DATA = [
+            {"age_months": 0, "min_weight_kg": 2.6, "max_weight_kg": 4.6},
+            {"age_months": 1, "min_weight_kg": 3.5, "max_weight_kg": 5.6},
+            {"age_months": 2, "min_weight_kg": 4.5, "max_weight_kg": 6.6},
+            {"age_months": 3, "min_weight_kg": 5.6, "max_weight_kg": 7.6},
+            {"age_months": 4, "min_weight_kg": 6.0, "max_weight_kg": 8.0},
+            {"age_months": 5, "min_weight_kg": 6.5, "max_weight_kg": 8.5},
+            {"age_months": 6, "min_weight_kg": 7.0, "max_weight_kg": 9.2},
+            {"age_months": 7, "min_weight_kg": 7.5, "max_weight_kg": 9.6},
+            {"age_months": 8, "min_weight_kg": 7.8, "max_weight_kg": 9.8},
+            {"age_months": 9, "min_weight_kg": 8.0, "max_weight_kg": 10.5},
+            {"age_months": 10, "min_weight_kg": 8.2, "max_weight_kg": 10.8},
+            {"age_months": 11, "min_weight_kg": 8.4, "max_weight_kg": 11.2},
+            {"age_months": 12, "min_weight_kg": 8.5, "max_weight_kg": 11.5},
+            {"age_months": 13, "min_weight_kg": 8.7, "max_weight_kg": 11.8},
+            {"age_months": 14, "min_weight_kg": 8.9, "max_weight_kg": 12.0},
+            {"age_months": 15, "min_weight_kg": 9.0, "max_weight_kg": 12.2},
+            {"age_months": 16, "min_weight_kg": 9.2, "max_weight_kg": 12.4},
+            {"age_months": 17, "min_weight_kg": 9.5, "max_weight_kg": 12.6},
+            {"age_months": 18, "min_weight_kg": 10.0, "max_weight_kg": 12.5},
+            {"age_months": 19, "min_weight_kg": 10.2, "max_weight_kg": 12.8},
+            {"age_months": 20, "min_weight_kg": 10.5, "max_weight_kg": 13.0},
+            {"age_months": 21, "min_weight_kg": 10.7, "max_weight_kg": 13.2},
+            {"age_months": 22, "min_weight_kg": 10.8, "max_weight_kg": 13.4},
+            {"age_months": 23, "min_weight_kg": 11.0, "max_weight_kg": 13.6},
+            {"age_months": 24, "min_weight_kg": 11.0, "max_weight_kg": 13.8}
+        ];
+
+        const getRefWeight = (ageInMonths) => {
+            const age = Math.max(0, Math.min(24, ageInMonths));
+            const lowIdx = Math.floor(age);
+            const highIdx = Math.ceil(age);
+            if (lowIdx === highIdx) return { min: REFERENCE_DATA[lowIdx].min_weight_kg, max: REFERENCE_DATA[lowIdx].max_weight_kg };
+            const ratio = age - lowIdx;
+            return {
+                min: REFERENCE_DATA[lowIdx].min_weight_kg + (REFERENCE_DATA[highIdx].min_weight_kg - REFERENCE_DATA[lowIdx].min_weight_kg) * ratio,
+                max: REFERENCE_DATA[lowIdx].max_weight_kg + (REFERENCE_DATA[highIdx].max_weight_kg - REFERENCE_DATA[lowIdx].max_weight_kg) * ratio
+            };
+        };
+
+        const getAgeInMonths = (birth, current) => (new Date(current) - new Date(birth)) / (1000 * 60 * 60 * 24 * 30.44);
+
+        const SimpleChart = ({ data, birthDate }) => {
+            if (!data || data.length < 2) return <div className="h-48 flex items-center justify-center bg-white rounded-2xl border border-gray-100 text-gray-400 text-sm italic">Add 2+ entries to visualize growth</div>;
+
+            const sorted = [...data].sort((a, b) => new Date(a.date) - new Date(b.date));
+            const padding = 35;
+            const width = 600;
+            const height = 280;
+
+            const dates = sorted.map(d => new Date(d.date).getTime());
+            const minDate = Math.min(...dates);
+            const maxDate = Math.max(...dates);
+
+            const refLines = [];
+            if (birthDate) {
+                for (let i = 0; i <= 20; i++) {
+                    const time = minDate + (maxDate - minDate) * (i / 20);
+                    const age = getAgeInMonths(birthDate, time);
+                    const ref = getRefWeight(age);
+                    refLines.push({ time, ...ref });
+                }
+            }
+
+            const allW = [...sorted.map(d => parseFloat(d.weight)), ...refLines.map(r => r.min), ...refLines.map(r => r.max)];
+            const minW = Math.min(...allW) - 0.5;
+            const maxW = Math.max(...allW) + 0.5;
+
+            const getX = (t) => ((t - minDate) / (maxDate - minDate || 1)) * (width - 2 * padding) + padding;
+            const getY = (w) => height - (((w - minW) / (maxW - minW || 1)) * (height - 2 * padding) + padding);
+
+            const userPoints = sorted.map(d => ({ x: getX(new Date(d.date).getTime()), y: getY(d.weight) }));
+            const userPath = userPoints.map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(' ');
+            const minRefPath = refLines.map((p, i) => (i === 0 ? `M ${getX(p.time)} ${getY(p.min)}` : `L ${getX(p.time)} ${getY(p.min)}`)).join(' ');
+            const maxRefPath = refLines.map((p, i) => (i === 0 ? `M ${getX(p.time)} ${getY(p.max)}` : `L ${getX(p.time)} ${getY(p.max)}`)).join(' ');
+
+            return (
+                <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
+                    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
+                        {[0, 0.25, 0.5, 0.75, 1].map((t, i) => (
+                            <line key={i} x1={padding} y1={padding + t * (height - 2 * padding)} x2={width - padding} y2={padding + t * (height - 2 * padding)} stroke="#f1f5f9" strokeWidth="1" />
+                        ))}
+                        {birthDate && (
+                            <g>
+                                <path d={minRefPath} fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="6 6" opacity="0.4" />
+                                <path d={maxRefPath} fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="6 6" opacity="0.4" />
+                                <text x={getX(maxDate)} y={getY(refLines[refLines.length-1].max) - 8} textAnchor="end" fontSize="10" fill="#94a3b8" className="font-black uppercase tracking-widest">High Ref</text>
+                                <text x={getX(maxDate)} y={getY(refLines[refLines.length-1].min) + 15} textAnchor="end" fontSize="10" fill="#94a3b8" className="font-black uppercase tracking-widest">Low Ref</text>
+                            </g>
+                        )}
+                        <path d={userPath} fill="none" stroke="#0ea5e9" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                        {userPoints.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="6" fill="white" stroke="#0ea5e9" strokeWidth="3" />)}
+                    </svg>
+                    <div className="flex justify-between mt-3 text-[10px] text-slate-400 font-black px-1 uppercase tracking-widest">
+                        <span>{new Date(minDate).toLocaleDateString()}</span>
+                        <span>{new Date(maxDate).toLocaleDateString()}</span>
+                    </div>
+                </div>
+            );
+        };
+
+        const HelpModal = ({ onClose }) => {
+            const isLocal = window.location.protocol === 'file:';
+            return (
+                <div className="fixed inset-0 modal-backdrop z-50 flex items-center justify-center p-6" onClick={onClose}>
+                    <div className="bg-white rounded-[2rem] p-6 w-full max-w-sm shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center">
+                            <h3 className="text-xl font-black text-slate-800">Saving App</h3>
+                            <button onClick={onClose} className="p-2 bg-gray-100 rounded-full text-gray-500">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                            </button>
+                        </div>
+                        
+                        <div className="text-sm text-slate-600 space-y-4">
+                            {isLocal ? (
+                                <div className="p-4 bg-orange-50 text-orange-800 rounded-xl text-xs font-medium">
+                                    <strong>Offline Mode Detected:</strong> You are opening this from your files. Android usually blocks the "Install" button for local files.
+                                </div>
+                            ) : (
+                                <div className="p-4 bg-green-50 text-green-800 rounded-xl text-xs font-medium">
+                                    <strong>Online Mode:</strong> You should see "Install App" in your browser menu.
+                                </div>
+                            )}
+
+                            <div>
+                                <h4 className="font-bold text-slate-800 mb-2">How to Add to Home Screen:</h4>
+                                <ol className="list-decimal pl-5 space-y-2">
+                                    <li>Tap the browser menu (3 dots at top right).</li>
+                                    <li>
+                                        {isLocal 
+                                            ? <span>Look for <strong>"Add to Home Screen"</strong> directly. If missing, tap the Star icon to bookmark it, then go to your Bookmarks widget to add it to home.</span> 
+                                            : <span>Tap <strong>"Install App"</strong> or <strong>"Add to Home Screen"</strong>.</span>
+                                        }
+                                    </li>
+                                </ol>
+                            </div>
+                        </div>
+                        <button onClick={onClose} className="w-full bg-slate-800 text-white py-4 rounded-xl font-bold">Got it</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [entries, setEntries] = useState(() => JSON.parse(localStorage.getItem('babyWeightData') || '[]'));
+            const [birthDate, setBirthDate] = useState(() => localStorage.getItem('babyBirthDate') || '');
+            const [view, setView] = useState('list');
+            const [weight, setWeight] = useState('');
+            const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
+            const [showHelp, setShowHelp] = useState(false);
+
+            useEffect(() => localStorage.setItem('babyWeightData', JSON.stringify(entries)), [entries]);
+            useEffect(() => { if(birthDate) localStorage.setItem('babyBirthDate', birthDate); }, [birthDate]);
+
+            const sortedEntries = useMemo(() => {
+                return [...entries].sort((a, b) => {
+                    const dateDiff = new Date(b.date) - new Date(a.date);
+                    if (dateDiff !== 0) return dateDiff;
+                    return b.weight - a.weight;
+                });
+            }, [entries]);
+
+            const latestEntry = sortedEntries[0];
+
+            const handleAdd = (e) => {
+                e.preventDefault();
+                setEntries(prev => [...prev, { id: Date.now().toString(), weight: parseFloat(weight).toFixed(2), date }]);
+                setWeight(''); setView('list');
+            };
+
+            const handleDelete = (id) => {
+                setEntries(prev => prev.filter(x => x.id !== id));
+            };
+
+            return (
+                <div className="flex flex-col h-full max-w-md mx-auto bg-gray-50 shadow-2xl overflow-hidden relative">
+                    <header className="bg-white px-6 pt-12 pb-6 rounded-b-[3rem] shadow-sm z-10">
+                        <div className="flex justify-between items-start mb-6">
+                            <div>
+                                <button onClick={() => setShowHelp(true)} className="flex items-center gap-1.5 mb-1 px-2 py-1 bg-slate-100 rounded-full text-[10px] font-bold text-slate-500 hover:bg-slate-200 transition-colors">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                    Can't Install?
+                                </button>
+                                <h1 className="text-2xl font-black text-slate-800 tracking-tight leading-none">Growth</h1>
+                                <button onClick={() => setView('settings')} className="text-[10px] text-baby-500 font-black uppercase tracking-widest flex items-center gap-1 mt-2">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-baby-500 animate-pulse"></span>
+                                    {birthDate ? `Born ${new Date(birthDate).toLocaleDateString()}` : 'Set Birthday'}
+                                </button>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-4xl font-black text-baby-600 tracking-tighter leading-none">
+                                    {latestEntry ? latestEntry.weight : '--'}
+                                    <span className="text-lg font-bold ml-0.5 uppercase">kg</span>
+                                </div>
+                                <div className="text-[10px] text-slate-300 font-black uppercase tracking-widest mt-1">Latest</div>
+                            </div>
+                        </div>
+                        <div className="flex p-1.5 bg-slate-100 rounded-2xl">
+                            <button onClick={() => setView('list')} className={`flex-1 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all ${view === 'list' ? 'bg-white shadow-sm text-baby-600' : 'text-slate-400'}`}>Chart</button>
+                            <button onClick={() => setView('add')} className={`flex-1 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all ${view === 'add' ? 'bg-white shadow-sm text-baby-600' : 'text-slate-400'}`}>Add</button>
+                        </div>
+                    </header>
+
+                    <main className="flex-1 overflow-y-auto p-5 space-y-6 pb-28">
+                        {view === 'list' && (
+                            <div className="animate-fade-in space-y-6">
+                                <SimpleChart data={entries} birthDate={birthDate} />
+                                <div className="space-y-3">
+                                    <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] ml-1">History</h2>
+                                    {sortedEntries.length === 0 ? (
+                                        <div className="text-center py-16 bg-white rounded-[2.5rem] border border-dashed border-slate-200">
+                                            <p className="text-slate-300 text-xs font-black uppercase tracking-widest">No entries yet</p>
+                                        </div>
+                                    ) : (
+                                        sortedEntries.map(e => (
+                                            <div key={e.id} className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm flex justify-between items-center group">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-12 h-12 rounded-2xl bg-baby-50 flex items-center justify-center text-baby-500">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 20A7 7 0 0 1 11 6a7 7 0 0 1 0 14Z"/><path d="M15 9l-4 4-2-2"/></svg>
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-xl font-black text-slate-800 leading-none">{e.weight} <span className="text-[10px] font-bold text-slate-400 uppercase">kg</span></div>
+                                                        <div className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1.5">
+                                                            {new Date(e.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <button onClick={() => handleDelete(e.id)} className="w-10 h-10 flex items-center justify-center text-slate-200 hover:text-red-400 active:scale-90 transition-all opacity-0 group-hover:opacity-100 sm:opacity-100">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+                                                </button>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                        {view === 'add' && (
+                            <form onSubmit={handleAdd} className="animate-fade-in bg-white p-10 rounded-[3rem] shadow-sm border border-slate-100 space-y-10">
+                                <div className="text-center">
+                                    <h2 className="text-2xl font-black text-slate-800 tracking-tight">Log Weight</h2>
+                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-2">Enter new measurement</p>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 text-center">Weight (KG)</label>
+                                    <input type="number" step="0.01" inputMode="decimal" required autoFocus value={weight} onChange={e => setWeight(e.target.value)} placeholder="0.00" className="w-full py-8 bg-slate-50 rounded-[2rem] text-6xl font-black text-center text-baby-600 focus:outline-none focus:ring-4 focus:ring-baby-100 placeholder:text-slate-200" />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 text-center">Date</label>
+                                    <input type="date" required value={date} onChange={e => setDate(e.target.value)} className="w-full p-6 bg-slate-50 rounded-2xl text-lg font-black text-center focus:outline-none focus:ring-4 focus:ring-baby-100" />
+                                </div>
+                                <button type="submit" className="w-full bg-baby-500 text-white font-black py-6 rounded-[2rem] shadow-xl shadow-baby-200 active:scale-95 transition-all text-xs uppercase tracking-[0.2em]">Confirm & Save</button>
+                            </form>
+                        )}
+                        {view === 'settings' && (
+                            <div className="animate-fade-in bg-white p-10 rounded-[3rem] shadow-sm border border-slate-100 space-y-10">
+                                <div className="text-center">
+                                    <h2 className="text-2xl font-black text-slate-800 tracking-tight">Baby Profile</h2>
+                                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-2">Set birth date for reference</p>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 text-center">Birth Date</label>
+                                    <input type="date" value={birthDate} onChange={e => setBirthDate(e.target.value)} className="w-full p-6 bg-slate-50 rounded-2xl text-lg font-black text-center focus:outline-none focus:ring-4 focus:ring-baby-100" />
+                                </div>
+                                <button onClick={() => setView('list')} className="w-full bg-slate-800 text-white font-black py-6 rounded-[2rem] active:scale-95 transition-all text-xs uppercase tracking-[0.2em]">Update</button>
+                            </div>
+                        )}
+                    </main>
+
+                    {view === 'list' && (
+                        <div className="absolute bottom-10 left-0 right-0 flex justify-center pointer-events-none">
+                            <button onClick={() => setView('add')} className="pointer-events-auto w-16 h-16 bg-baby-500 text-white rounded-full shadow-2xl shadow-baby-400 flex items-center justify-center text-4xl font-light active:scale-90 transition-all">+</button>
+                        </div>
+                    )}
+
+                    {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
+
+
